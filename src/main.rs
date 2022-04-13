@@ -249,20 +249,25 @@ fn search<'obj>(
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// The input ELF
+    input: String,
     /// Name of the symbol to trace
     #[clap(short, long)]
-    name: String,
+    name: Option<String>,
     /// Comma seperated list of sections to ignore (ex: "il2cpp")
     #[clap(short, long, default_value_t)]
     ignore_sections: String,
+    /// Create a graph from the xrefs, outputs to "./data/graph.dot"
+    #[clap(short, long)]
+    graph: bool,
 }
 
 fn main() -> Result<()> {
-    let bin_data = fs::read("./data/libil2cpp.dbg.so")?;
+    let args = Args::parse();
+    let bin_data = fs::read(args.input)?;
     let obj_file = object::File::parse(&*bin_data)?;
     ensure!(obj_file.has_debug_symbols(), "no debug symbols were found");
 
-    let args = Args::parse();
     let ignored_sections = args
         .ignore_sections
         .split(',')
@@ -270,11 +275,15 @@ fn main() -> Result<()> {
         .collect();
     let graph_info = gen_graph(&bin_data, &obj_file, ignored_sections)?;
 
-    let dot = Dot::new(&graph_info.graph);
-    fs::write("./data/graph.dot", format!("{:?}", dot))?;
+    if args.graph {
+        let dot = Dot::new(&graph_info.graph);
+        fs::write("./data/graph.dot", format!("{:?}", dot))?;
+    }
 
-    let path = search(&obj_file, &graph_info, &args.name).context("could not find path")?;
-    finish(&graph_info.graph, path);
+    if let Some(name) = args.name {
+        let path = search(&obj_file, &graph_info, &name).context("could not find path")?;
+        finish(&graph_info.graph, path);
+    }
 
     Ok(())
 }
