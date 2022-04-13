@@ -1,6 +1,6 @@
 #![feature(bool_to_option)]
 
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{anyhow, bail, ensure, Result, Context};
 use bad64::{disasm, Imm, Op, Operand};
 use object::elf::{STT_FUNC, STT_OBJECT};
 use object::{Object, ObjectSymbol, SymbolFlags};
@@ -61,18 +61,13 @@ impl fmt::Debug for Ref {
 
 type Graph<'obj> = DiGraph<Symbol<'obj>, Ref>;
 
-fn finish(graph: &Graph, path: Vec<EdgeReference<Ref>>) -> ! {
-    println!("start: {}", graph[path.last().unwrap().source()].demangled);
-    for (i, e) in path.iter().rev().enumerate() {
-        let source = &graph[e.target()];
-        let r = &graph[e.id()];
-        println!("{}: {}({}): {}", i, r.ty, r.num, source.demangled);
-    }
-
-    std::process::exit(0);
+struct GraphInfo<'obj> {
+    graph: Graph<'obj>,
+    name_map: HashMap<&'obj str, NodeIndex>,
+    symbol_map: HashMap<u64, NodeIndex>,
 }
 
-fn search(bin_data: &[u8], obj_file: &object::File, find_name: &str) -> anyhow::Result<()> {
+fn gen_graph<'obj>(bin_data: &[u8], obj_file: &'obj object::File) -> Result<GraphInfo<'obj>> {
     let mut graph = Graph::new();
     let mut symbol_map = HashMap::new();
     let mut name_map = HashMap::new();
@@ -143,14 +138,15 @@ fn search(bin_data: &[u8], obj_file: &object::File, find_name: &str) -> anyhow::
         }
     }
 
+    Ok(GraphInfo { graph, name_map, symbol_map })
+}
 
-    let dot = Dot::new(&graph);
-    fs::write("./data/graph.dot", format!("{:?}", dot))?;
-
+fn search<'obj>(obj_file: &object::File, graph_info: &'obj GraphInfo, name: &str) -> Option<Vec<EdgeReference<'obj, Ref>>> {
+    let graph = &graph_info.graph;
     let roots: HashSet<_> = obj_file.symbols().filter_map(|s| s.is_global().then_some(s.address())).collect();
 
     let mut queue: VecDeque<(NodeIndex, Vec<EdgeReference<_>>)> = VecDeque::new();
-    queue.push_back((name_map[find_name], Vec::new()));
+    queue.push_back((graph_info.name_map[name], Vec::new()));
     let mut visited: HashSet<NodeIndex> = HashSet::new();
     while !queue.is_empty() {
         let (n, mut path) = queue.pop_front().unwrap();
@@ -159,7 +155,7 @@ fn search(bin_data: &[u8], obj_file: &object::File, find_name: &str) -> anyhow::
             let source = e.source();
             if roots.contains(&graph[source].addr) {
                 path.push(e);
-                finish(&graph, path);
+                return Some(path);
             } else if !visited.contains(&source) {
                 visited.insert(source);
                 let mut path = path.clone();
@@ -168,11 +164,9 @@ fn search(bin_data: &[u8], obj_file: &object::File, find_name: &str) -> anyhow::
             }
             
         }
-
     }
 
-
-    Ok(())
+    None
 }
 
 /// Xref trace generator
@@ -190,7 +184,22 @@ fn main() -> Result<()> {
     ensure!(obj_file.has_debug_symbols(), "no debug symbols were found");
 
     let args = Args::parse();
-    search(&bin_data, &obj_file, &args.name)?;
+    let graph_info = gen_graph(&bin_data, &obj_file)?;
+
+    let dot = Dot::new(&graph_info.graph);
+    fs::write("./data/graph.dot", format!("{:?}", dot))?;
+
+    let path = search(&obj_file, &graph_info, &args.name).context("could not find path")?;
+    finish(&graph_info.graph, path);
 
     Ok(())
+}
+
+fn finish(graph: &Graph, path: Vec<EdgeReference<Ref>>) {
+    println!("start: {}", graph[path.last().unwrap().source()].demangled);
+    for (i, e) in path.iter().rev().enumerate() {
+        let target = &graph[e.target()];
+        let r = &graph[e.id()];
+        println!("{}: {}({}): {}", i, r.ty, r.num, target.demangled);
+    }
 }
