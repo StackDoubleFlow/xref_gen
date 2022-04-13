@@ -213,7 +213,7 @@ fn search<'obj>(
     obj_file: &object::File,
     graph_info: &'obj GraphInfo,
     name: &str,
-) -> Option<Vec<EdgeReference<'obj, Ref>>> {
+) -> Result<Vec<EdgeReference<'obj, Ref>>> {
     let graph = &graph_info.graph;
     let roots: HashSet<_> = obj_file
         .symbols()
@@ -223,7 +223,7 @@ fn search<'obj>(
     // Instead of keeping track of the paths like this, I should be keeping track of node parents,
     // but whatever
     let mut queue: VecDeque<(NodeIndex, Vec<EdgeReference<_>>)> = VecDeque::new();
-    queue.push_back((graph_info.name_map[name], Vec::new()));
+    queue.push_back((*graph_info.name_map.get(name).context("could not find symbol")?, Vec::new()));
     let mut visited: HashSet<NodeIndex> = HashSet::new();
     while !queue.is_empty() {
         let (n, mut path) = queue.pop_front().unwrap();
@@ -232,7 +232,7 @@ fn search<'obj>(
             let source = e.source();
             if roots.contains(&graph[source].addr) {
                 path.push(e);
-                return Some(path);
+                return Ok(path);
             } else if !visited.contains(&source) {
                 visited.insert(source);
                 let mut path = path.clone();
@@ -242,7 +242,7 @@ fn search<'obj>(
         }
     }
 
-    None
+    bail!("no path was found")
 }
 
 /// Xref trace generator
