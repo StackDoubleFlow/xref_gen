@@ -1,6 +1,7 @@
 use crate::graph::{search, GraphInfo, RefType};
 use petgraph::visit::EdgeRef;
 use serde::Serialize;
+use indicatif::ProgressIterator;
 
 pub const SCRIPT_SOURCE: &str = include_str!("../resources/xrefgen.py");
 
@@ -20,7 +21,7 @@ pub fn gen_ghidra_data<'a>(obj_file: &object::File, graph_info: &'a GraphInfo) -
     let mut traces = Vec::new();
 
     let graph = &graph_info.graph;
-    for node in graph_info.graph.node_indices() {
+    for node in graph_info.graph.node_indices().progress() {
         if let Ok(path) = search(obj_file, graph_info, node) {
             let symbol = graph[node].name;
             let start = graph[path.last().unwrap().source()].name;
