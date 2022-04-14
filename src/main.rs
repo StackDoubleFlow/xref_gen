@@ -1,5 +1,6 @@
 #![feature(bool_to_option)]
 
+mod ghidra;
 mod graph;
 
 use anyhow::{ensure, Context, Result};
@@ -10,6 +11,8 @@ use petgraph::dot::Dot;
 use petgraph::graph::EdgeReference;
 use petgraph::visit::EdgeRef;
 use std::fs;
+
+use crate::ghidra::gen_ghidra_data;
 
 /// Xref trace generator
 #[derive(Parser, Debug)]
@@ -26,6 +29,9 @@ struct Args {
     /// Create a graph from the xrefs, outputs to "./data/graph.dot"
     #[clap(short, long)]
     graph: bool,
+    /// Generate data to be imported into ghidra
+    #[clap(long)]
+    ghidra: bool,
 }
 
 fn main() -> Result<()> {
@@ -46,8 +52,18 @@ fn main() -> Result<()> {
         fs::write("./data/graph.dot", format!("{:?}", dot))?;
     }
 
+    if args.ghidra {
+        let out = gen_ghidra_data(&obj_file, &graph_info);
+        fs::write("./data/ghidra_data.json", serde_json::to_string(&out)?)?;
+        fs::write("./data/xref_gen_ghidra.py", ghidra::SCRIPT_SOURCE)?;
+    }
+
     if let Some(name) = args.name {
-        let path = search(&obj_file, &graph_info, &name).context("could not find path")?;
+        let node = *graph_info
+            .name_map
+            .get(name.as_str())
+            .context("could not find symbol")?;
+        let path = search(&obj_file, &graph_info, node).context("could not find path")?;
         finish(&graph_info.graph, path);
     }
 

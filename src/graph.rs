@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use bad64::{disasm, Imm, Op, Operand, Reg};
 use object::elf::{STT_FUNC, STT_OBJECT};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
@@ -50,9 +50,9 @@ impl fmt::Display for RefType {
 }
 
 pub struct Ref {
-    ty: RefType,
-    num: usize,
-    offset: u64,
+    pub ty: RefType,
+    pub num: usize,
+    pub offset: u64,
 }
 
 impl fmt::Debug for Ref {
@@ -160,13 +160,20 @@ pub fn gen_graph<'obj>(
                     num_adrp += 1;
                     continue;
                 }
-                Op::LDR => {
-                    let (reg, imm) = match ins.operands()[1] {
-                        Operand::MemOffset {
-                            reg,
-                            offset: Imm::Signed(imm),
-                            ..
-                        } => (reg, imm),
+                op @ (Op::LDR | Op::ADD) => {
+                    let (reg, imm) = match op {
+                        Op::LDR => match ins.operands()[1] {
+                            Operand::MemOffset {
+                                reg,
+                                offset: Imm::Signed(imm),
+                                ..
+                            } => (reg, imm),
+                            _ => continue,
+                        }
+                        Op::ADD => match ins.operands() {
+                            &[_, Operand::Reg { reg, .. }, Operand::Imm64 { imm: Imm::Signed(imm), .. }] => (reg, imm),
+                            _ => continue,
+                        }
                         _ => continue,
                     };
                     let adrp = match adrp_map.get(&reg) {
@@ -208,7 +215,7 @@ pub fn gen_graph<'obj>(
 pub fn search<'obj>(
     obj_file: &object::File,
     graph_info: &'obj GraphInfo,
-    name: &str,
+    node: NodeIndex,
 ) -> Result<Vec<EdgeReference<'obj, Ref>>> {
     let graph = &graph_info.graph;
     let roots: HashSet<_> = obj_file
@@ -219,13 +226,7 @@ pub fn search<'obj>(
     // Instead of keeping track of the paths like this, I should be keeping track of node parents,
     // but whatever
     let mut queue: VecDeque<(NodeIndex, Vec<EdgeReference<_>>)> = VecDeque::new();
-    queue.push_back((
-        *graph_info
-            .name_map
-            .get(name)
-            .context("could not find symbol")?,
-        Vec::new(),
-    ));
+    queue.push_back((node, Vec::new()));
     let mut visited: HashSet<NodeIndex> = HashSet::new();
     while !queue.is_empty() {
         let (n, mut path) = queue.pop_front().unwrap();
