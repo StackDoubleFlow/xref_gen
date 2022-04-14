@@ -171,7 +171,7 @@ pub fn gen_graph<'obj>(
                             _ => continue,
                         }
                         Op::ADD => match ins.operands() {
-                            &[_, Operand::Reg { reg, .. }, Operand::Imm64 { imm: Imm::Signed(imm), .. }] => (reg, imm),
+                            &[_, Operand::Reg { reg, .. }, Operand::Imm64 { imm: Imm::Unsigned(imm), .. }] => (reg, imm as i64),
                             _ => continue,
                         }
                         _ => continue,
