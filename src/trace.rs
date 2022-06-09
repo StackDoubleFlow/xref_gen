@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::graph::{GraphInfo, Ref, RefType};
+use crate::graph::{GraphInfo, Ref, RefType, Node};
 use crate::il2cpp::Il2CppData;
 use anyhow::{bail, Result};
 use il2cpp_binary::Elf;
@@ -83,6 +83,9 @@ pub fn gen_trace_data<'a>(
     let graph = &graph_info.graph;
     for node in graph_info.graph.node_indices().progress() {
         if let Ok(path) = trace(obj_file, graph_info, node, il2cpp_data) {
+            if !matches!(&graph[node], Node::Symbol(_)) {
+                continue;
+            }
             let symbol = graph[node].name();
             let start = graph[path.last().unwrap().source()].name();
 
