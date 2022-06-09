@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+use std::io::Cursor;
+
 use anyhow::{Context, Result};
+use byteorder::{LittleEndian, ReadBytesExt};
 use il2cpp_binary::{find_registration, get_str, CodeRegistration, Elf};
 use object::{Object, ObjectSection};
 
@@ -10,8 +14,14 @@ pub struct Il2CppMethod<'a> {
     pub size: u64,
 }
 
+pub struct Invoker {
+    pub method_idx: usize,
+    pub addr: u64,
+}
+
 pub struct Il2CppData<'a> {
     pub methods: Vec<Il2CppMethod<'a>>,
+    pub invokers: Vec<Invoker>,
 }
 
 pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>> {
@@ -19,6 +29,8 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
     let metadata = il2cpp_metadata_raw::deserialize(metadata_data)?;
     let (code_registration, _) = find_registration(elf)?;
     let code_registration = CodeRegistration::read(elf, code_registration)?;
+
+    let mut invoker_uses = HashMap::new();
 
     for image in &metadata.images {
         let name = get_str(metadata.string, image.name_index as usize)?;
@@ -44,6 +56,13 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
                 let offset = module.method_pointers[rid as usize - 1];
                 if offset == 0 {
                     continue;
+                }
+
+                let mut cur = Cursor::new(elf.data());
+                cur.set_position(module.invoker_indices_ptr + (rid as u64 - 1) * 4);
+                let invoker_idx = cur.read_i32::<LittleEndian>()?;
+                if invoker_idx != -1 {
+                    invoker_uses.entry(invoker_idx).or_insert(methods.len());
                 }
 
                 methods.push(Il2CppMethod {
@@ -75,5 +94,13 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
     let last = methods.last_mut().unwrap();
     last.size = section_end - last.addr;
 
-    Ok(Il2CppData { methods })
+    let invokers = invoker_uses
+        .iter()
+        .map(|(&invoker_idx, &method_idx)| Invoker {
+            method_idx,
+            addr: code_registration.invoker_pointers[invoker_idx as usize],
+        })
+        .collect();
+
+    Ok(Il2CppData { methods, invokers })
 }

@@ -17,3 +17,4 @@ serde_json = "1"
 indicatif = "0.16"
 il2cpp_metadata_raw = { git = "https://github.com/StackDoubleFlow/brocolib.git" }
 il2cpp_binary = { git = "https://github.com/StackDoubleFlow/brocolib.git" }
+byteorder = "1.4"

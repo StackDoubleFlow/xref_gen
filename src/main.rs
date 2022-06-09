@@ -74,7 +74,8 @@ fn main() -> Result<()> {
             .name_map
             .get(name.as_str())
             .context("could not find symbol")?;
-        let path = trace(&obj_file, &graph_info, node, &il2cpp_data).context("could not find path")?;
+        let path =
+            trace(&obj_file, &graph_info, node, &il2cpp_data).context("could not find path")?;
         finish(&graph_info.graph, path);
     }
 

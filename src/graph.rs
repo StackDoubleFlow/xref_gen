@@ -32,6 +32,7 @@ impl fmt::Debug for Node<'_> {
 pub enum Node<'obj> {
     Symbol(Symbol<'obj>),
     Il2CppMethod(&'obj Il2CppMethod<'obj>),
+    Invoker(&'obj Il2CppMethod<'obj>, u64, u64),
 }
 
 impl<'obj> Node<'obj> {
@@ -39,6 +40,7 @@ impl<'obj> Node<'obj> {
         match self {
             Node::Symbol(symbol) => symbol.ty == SymbolType::Function,
             Node::Il2CppMethod(_) => true,
+            Node::Invoker(_, _, _) => true,
         }
     }
 
@@ -46,6 +48,7 @@ impl<'obj> Node<'obj> {
         match self {
             Node::Symbol(symbol) => symbol.size,
             Node::Il2CppMethod(method) => method.size,
+            Node::Invoker(_, _, size) => *size,
         }
     }
 
@@ -53,6 +56,7 @@ impl<'obj> Node<'obj> {
         match self {
             Node::Symbol(symbol) => symbol.addr,
             Node::Il2CppMethod(method) => method.addr,
+            Node::Invoker(_, addr, _) => *addr,
         }
     }
 
@@ -63,6 +67,10 @@ impl<'obj> Node<'obj> {
                 "il2cpp:{}.{}::{}",
                 method.namespace, method.class, method.method_idx
             ),
+            Node::Invoker(method, _, _) => format!(
+                "invoker:{}.{}::{}",
+                method.namespace, method.class, method.method_idx
+            ),
         }
     }
 
@@ -71,6 +79,10 @@ impl<'obj> Node<'obj> {
             Node::Symbol(symbol) => symbol.demangled.to_string(),
             Node::Il2CppMethod(method) => format!(
                 "{}.{}::{}",
+                method.namespace, method.class, method.method_idx
+            ),
+            Node::Invoker(method, _, _) => format!(
+                "Invoker for {}.{}::{}",
                 method.namespace, method.class, method.method_idx
             ),
         }
@@ -134,10 +146,21 @@ pub fn gen_graph<'obj>(
     let mut symbol_map = HashMap::new();
     let mut name_map = HashMap::new();
 
+    let mut ignore_set_size = HashMap::new();
     if let Some(il2cpp_data) = il2cpp_data {
         for method in &il2cpp_data.methods {
             let n = graph.add_node(Node::Il2CppMethod(method));
             symbol_map.insert(method.addr, n);
+        }
+
+        for invoker in &il2cpp_data.invokers {
+            let n = graph.add_node(Node::Invoker(
+                &il2cpp_data.methods[invoker.method_idx],
+                invoker.addr,
+                0,
+            ));
+            ignore_set_size.insert(invoker.addr, n);
+            symbol_map.insert(invoker.addr, n);
         }
     }
 
@@ -157,6 +180,13 @@ pub fn gen_graph<'obj>(
             if ignore_sections.contains(obj_file.section_by_index(section_idx)?.name()?) {
                 continue;
             }
+        }
+        if let Some(&n) = ignore_set_size.get(&symbol.address()) {
+            match &mut graph[n] {
+                Node::Invoker(_, _, size) => *size = symbol.size(),
+                _ => bail!("cannot set size of this node"),
+            }
+            continue;
         }
         let demangled = if let Ok(demangle) = cpp_demangle::Symbol::new(symbol.name_bytes()?) {
             demangle.to_string()

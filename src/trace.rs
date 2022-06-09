@@ -40,6 +40,9 @@ pub fn trace<'obj>(
         for method in &il2cpp_data.methods {
             roots.insert(method.addr);
         }
+        for invoker in &il2cpp_data.invokers {
+            roots.insert(invoker.addr);
+        }
     }
     // let mut roots = HashSet::new();
     // roots.insert(obj_file.symbols().find(|s| s.name().unwrap() == "_ZN6il2cpp2vm7Runtime4InitEPKc").unwrap().address());
