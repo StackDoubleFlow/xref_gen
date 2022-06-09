@@ -64,11 +64,11 @@ impl<'obj> Node<'obj> {
         match self {
             Node::Symbol(symbol) => symbol.name.to_string(),
             Node::Il2CppMethod(method) => format!(
-                "il2cpp:{}.{}:{}",
+                "il2cpp:{}:{}:{}",
                 method.namespace, method.class, method.method_idx
             ),
             Node::Invoker(method, _, _) => format!(
-                "invoker:{}.{}:{}",
+                "invoker:{}:{}:{}",
                 method.namespace, method.class, method.method_idx
             ),
         }
@@ -78,11 +78,11 @@ impl<'obj> Node<'obj> {
         match self {
             Node::Symbol(symbol) => symbol.demangled.to_string(),
             Node::Il2CppMethod(method) => format!(
-                "{}.{}:{}",
+                "{}.{}::{}",
                 method.namespace, method.class, method.method_idx
             ),
             Node::Invoker(method, _, _) => format!(
-                "Invoker for {}.{}:{}",
+                "Invoker for {}.{}::{}",
                 method.namespace, method.class, method.method_idx
             ),
         }
