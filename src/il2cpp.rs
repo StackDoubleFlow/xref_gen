@@ -28,7 +28,7 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
         for type_def in &metadata.type_definitions
             [image.type_start as usize..image.type_start as usize + image.type_count as usize]
         {
-            let name = get_str(metadata.string, type_def.name_index as usize)?;
+            let class = get_str(metadata.string, type_def.name_index as usize)?;
             let namespace = get_str(metadata.string, type_def.namespace_index as usize)?;
             let method_start = if type_def.method_count > 0 {
                 type_def.method_start
@@ -42,9 +42,13 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
             {
                 let rid = method.token & 0x00FFFFFF;
                 let offset = module.method_pointers[rid as usize - 1];
+                if offset == 0 {
+                    continue;
+                }
+
                 methods.push(Il2CppMethod {
                     method_idx: idx,
-                    class: name,
+                    class,
                     namespace,
                     addr: offset,
                     size: 0,
