@@ -12,7 +12,7 @@ listing = currentProgram.getListing()
 def readTrace(trace):
     matching = getGlobalFunctions(trace["start"])
     if len(matching) < 1:
-        print("Count not find starting point: " + trace["start"])
+        print("Could not find starting point: " + trace["start"])
         return
     start = matching[0]
 

@@ -1,12 +1,13 @@
 use anyhow::{anyhow, bail, Result};
 use bad64::{disasm, Imm, Op, Operand, Reg};
+use il2cpp_binary::Elf;
 use object::elf::{STT_FUNC, STT_OBJECT};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
-use petgraph::graph::{DiGraph, EdgeReference, NodeIndex};
-use petgraph::visit::EdgeRef;
-use petgraph::EdgeDirection;
-use std::collections::{HashMap, HashSet, VecDeque};
+use petgraph::graph::{DiGraph, NodeIndex};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+use crate::il2cpp::{Il2CppData, Il2CppMethod};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SymbolType {
@@ -22,9 +23,57 @@ pub struct Symbol<'obj> {
     pub ty: SymbolType,
 }
 
-impl fmt::Debug for Symbol<'_> {
+impl fmt::Debug for Node<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.demangled)
+        write!(f, "{}", self.demangled())
+    }
+}
+
+pub enum Node<'obj> {
+    Symbol(Symbol<'obj>),
+    Il2CppMethod(&'obj Il2CppMethod<'obj>),
+}
+
+impl<'obj> Node<'obj> {
+    fn is_function(&self) -> bool {
+        match self {
+            Node::Symbol(symbol) => symbol.ty == SymbolType::Function,
+            Node::Il2CppMethod(_) => true,
+        }
+    }
+
+    fn size(&self) -> u64 {
+        match self {
+            Node::Symbol(symbol) => symbol.size,
+            Node::Il2CppMethod(method) => method.size,
+        }
+    }
+
+    pub fn addr(&self) -> u64 {
+        match self {
+            Node::Symbol(symbol) => symbol.addr,
+            Node::Il2CppMethod(method) => method.addr,
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            Node::Symbol(symbol) => symbol.name.to_string(),
+            Node::Il2CppMethod(method) => format!(
+                "il2cpp:{}.{}::{}",
+                method.namespace, method.class, method.method_idx
+            ),
+        }
+    }
+
+    pub fn demangled(&self) -> String {
+        match self {
+            Node::Symbol(symbol) => symbol.demangled.to_string(),
+            Node::Il2CppMethod(method) => format!(
+                "{}.{}::{}",
+                method.namespace, method.class, method.method_idx
+            ),
+        }
     }
 }
 
@@ -67,7 +116,7 @@ impl fmt::Debug for Ref {
     }
 }
 
-pub type Graph<'obj> = DiGraph<Symbol<'obj>, Ref>;
+pub type Graph<'obj> = DiGraph<Node<'obj>, Ref>;
 
 pub struct GraphInfo<'obj> {
     pub graph: Graph<'obj>,
@@ -77,12 +126,20 @@ pub struct GraphInfo<'obj> {
 
 pub fn gen_graph<'obj>(
     bin_data: &[u8],
-    obj_file: &'obj object::File,
+    obj_file: &'obj Elf,
     ignore_sections: HashSet<String>,
+    il2cpp_data: &'obj Option<Il2CppData>,
 ) -> Result<GraphInfo<'obj>> {
     let mut graph = Graph::new();
     let mut symbol_map = HashMap::new();
     let mut name_map = HashMap::new();
+
+    if let Some(il2cpp_data) = il2cpp_data {
+        for method in &il2cpp_data.methods {
+            let n = graph.add_node(Node::Il2CppMethod(method));
+            symbol_map.insert(method.addr, n);
+        }
+    }
 
     for symbol in obj_file.symbols() {
         if !symbol.is_definition() {
@@ -106,26 +163,26 @@ pub fn gen_graph<'obj>(
         } else {
             symbol.name()?.to_string()
         };
-        let n = graph.add_node(Symbol {
+        let n = graph.add_node(Node::Symbol(Symbol {
             addr: symbol.address(),
             size: symbol.size(),
             name: symbol.name()?,
             demangled,
             ty,
-        });
+        }));
         symbol_map.insert(symbol.address(), n);
         name_map.insert(symbol.name()?, n);
     }
 
     for node_idx in graph.node_indices() {
         let n = &graph[node_idx];
-        if n.ty != SymbolType::Function {
+        if !n.is_function() {
             continue;
         }
 
-        let addr = n.addr;
-        let code = &bin_data[addr as usize..(addr + n.size) as usize];
-        let decoded = disasm(code, n.addr);
+        let addr = n.addr();
+        let code = &bin_data[addr as usize..(addr + n.size()) as usize];
+        let decoded = disasm(code, addr);
         let mut num_b = 0;
         let mut num_bl = 0;
         let mut num_adrp = 0;
@@ -169,11 +226,14 @@ pub fn gen_graph<'obj>(
                                 ..
                             } => (reg, imm),
                             _ => continue,
-                        }
+                        },
                         Op::ADD => match ins.operands() {
-                            &[_, Operand::Reg { reg, .. }, Operand::Imm64 { imm: Imm::Unsigned(imm), .. }] => (reg, imm as i64),
+                            &[_, Operand::Reg { reg, .. }, Operand::Imm64 {
+                                imm: Imm::Unsigned(imm),
+                                ..
+                            }] => (reg, imm as i64),
                             _ => continue,
-                        }
+                        },
                         _ => continue,
                     };
                     let adrp = match adrp_map.get(&reg) {
@@ -210,40 +270,4 @@ pub fn gen_graph<'obj>(
         name_map,
         symbol_map,
     })
-}
-
-pub fn search<'obj>(
-    obj_file: &object::File,
-    graph_info: &'obj GraphInfo,
-    node: NodeIndex,
-) -> Result<Vec<EdgeReference<'obj, Ref>>> {
-    let graph = &graph_info.graph;
-    let roots: HashSet<_> = obj_file
-        .symbols()
-        .filter_map(|s| s.is_global().then_some(s.address()))
-        .collect();
-
-    // Instead of keeping track of the paths like this, I should be keeping track of node parents,
-    // but whatever
-    let mut queue: VecDeque<(NodeIndex, Vec<EdgeReference<_>>)> = VecDeque::new();
-    queue.push_back((node, Vec::new()));
-    let mut visited: HashSet<NodeIndex> = HashSet::new();
-    while !queue.is_empty() {
-        let (n, mut path) = queue.pop_front().unwrap();
-        visited.insert(n);
-        for e in graph.edges_directed(n, EdgeDirection::Incoming) {
-            let source = e.source();
-            if roots.contains(&graph[source].addr) {
-                path.push(e);
-                return Ok(path);
-            } else if !visited.contains(&source) {
-                visited.insert(source);
-                let mut path = path.clone();
-                path.push(e);
-                queue.push_back((source, path));
-            }
-        }
-    }
-
-    bail!("no path was found")
 }
