@@ -65,11 +65,11 @@ impl<'obj> Node<'obj> {
             Node::Symbol(symbol) => symbol.name.to_string(),
             Node::Il2CppMethod(method) => format!(
                 "il2cpp:{}:{}:{}",
-                method.namespace, method.class, method.method_idx
+                method.namespace, method.class, method.name
             ),
             Node::Invoker(method, _, _) => format!(
                 "invoker:{}:{}:{}",
-                method.namespace, method.class, method.method_idx
+                method.namespace, method.class, method.name
             ),
         }
     }
@@ -79,11 +79,11 @@ impl<'obj> Node<'obj> {
             Node::Symbol(symbol) => symbol.demangled.to_string(),
             Node::Il2CppMethod(method) => format!(
                 "{}.{}::{}",
-                method.namespace, method.class, method.method_idx
+                method.namespace, method.class, method.name
             ),
             Node::Invoker(method, _, _) => format!(
                 "Invoker for {}.{}::{}",
-                method.namespace, method.class, method.method_idx
+                method.namespace, method.class, method.name
             ),
         }
     }

@@ -7,7 +7,7 @@ use il2cpp_binary::{find_registration, get_str, CodeRegistration, Elf};
 use object::{Object, ObjectSection};
 
 pub struct Il2CppMethod<'a> {
-    pub method_idx: usize,
+    pub name: &'a str,
     pub class: &'a str,
     pub namespace: &'a str,
     pub addr: u64,
@@ -65,8 +65,9 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
                     invoker_uses.entry(invoker_idx).or_insert(methods.len());
                 }
 
+                let method_name = get_str(metadata.string, method.name_index as usize)?;
                 methods.push(Il2CppMethod {
-                    method_idx: idx,
+                    name: method_name,
                     class,
                     namespace,
                     addr: offset,
@@ -77,22 +78,16 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
     }
 
     methods.sort_by_key(|m| m.addr);
-    let mut addrs = Vec::new();
-    for method in &methods {
-        if method.addr == 0 {
-            continue;
-        }
-        addrs.push(method.addr);
-    }
 
-    let section = elf.section_by_name("il2cpp").unwrap();
-    let section_end = section.address() + section.size();
+    // let section = elf.section_by_name("il2cpp").unwrap();
+    // let section_end = section.address() + section.size();
 
     for i in 0..methods.len() - 1 {
         methods[i].size = methods[i + 1].addr - methods[i].addr;
     }
-    let last = methods.last_mut().unwrap();
-    last.size = section_end - last.addr;
+    // Just don't use the last one for now
+    // let last = methods.last_mut().unwrap();
+    // last.size = section_end - last.addr;
 
     let invokers = invoker_uses
         .iter()
