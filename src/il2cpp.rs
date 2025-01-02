@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use il2cpp_binary::{get_str, registrations, Elf};
+use brocolib::Metadata;
 use std::collections::HashMap;
 
 pub struct Il2CppMethod<'a> {
@@ -20,35 +20,26 @@ pub struct Il2CppData<'a> {
     pub invokers: Vec<Invoker>,
 }
 
-pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>> {
+pub fn process<'a>(metadata: &'a Metadata<'a, 'a>) -> Result<Il2CppData<'a>> {
     let mut methods = Vec::new();
-    let metadata = il2cpp_metadata_raw::deserialize(metadata_data)?;
-    let (code_registration, _) = registrations(elf, &metadata)?;
 
     let mut invoker_uses = HashMap::new();
 
-    for image in &metadata.images {
-        let name = get_str(metadata.string, image.name_index as usize)?;
-        let module = code_registration
+    for image in metadata.global_metadata.images.as_vec() {
+        let name = image.name(&metadata);
+        let module = metadata
+            .runtime_metadata
+            .code_registration
             .code_gen_modules
             .iter()
             .find(|m| m.name == name);
         let module = module
             .with_context(|| format!("count not find code registration module '{}'", name))?;
-        for type_def in &metadata.type_definitions
-            [image.type_start as usize..image.type_start as usize + image.type_count as usize]
-        {
-            let class = get_str(metadata.string, type_def.name_index as usize)?;
-            let namespace = get_str(metadata.string, type_def.namespace_index as usize)?;
-            let method_start = if type_def.method_count > 0 {
-                type_def.method_start
-            } else {
-                0
-            };
-            for method in &metadata.methods
-                [method_start as usize..method_start as usize + type_def.method_count as usize]
-            {
-                let rid = method.token & 0x00FFFFFF;
+        for type_def in image.types(&metadata) {
+            let class = type_def.name(&metadata);
+            let namespace = type_def.namespace(&metadata);
+            for method in type_def.methods(&metadata) {
+                let rid = method.token.rid();
                 let offset = module.method_pointers[rid as usize - 1];
                 if offset == 0 {
                     continue;
@@ -59,7 +50,7 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
                     invoker_uses.entry(invoker_idx).or_insert(methods.len());
                 }
 
-                let method_name = get_str(metadata.string, method.name_index as usize)?;
+                let method_name = method.name(&metadata);
                 methods.push(Il2CppMethod {
                     name: method_name,
                     class,
@@ -87,7 +78,8 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
         .iter()
         .map(|(&invoker_idx, &method_idx)| Invoker {
             method_idx,
-            addr: code_registration.invoker_pointers[invoker_idx as usize],
+            addr: metadata.runtime_metadata.code_registration.invoker_pointers
+                [invoker_idx as usize],
         })
         .collect();
 

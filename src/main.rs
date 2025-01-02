@@ -4,9 +4,11 @@ mod trace;
 
 use crate::trace::{gen_trace_data, trace};
 use anyhow::{ensure, Context, Result};
+use brocolib::runtime_metadata::elf::Elf;
+use brocolib::runtime_metadata::RuntimeMetadata;
+use brocolib::Metadata;
 use clap::Parser;
 use graph::{gen_graph, Graph, Ref};
-use il2cpp_binary::Elf;
 use object::Object;
 use petgraph::dot::Dot;
 use petgraph::graph::EdgeReference;
@@ -42,12 +44,23 @@ fn main() -> Result<()> {
     let obj_file = Elf::parse(&*bin_data)?;
     ensure!(obj_file.has_debug_symbols(), "no debug symbols were found");
 
-    let il2cpp_metadata = match args.il2cpp_metadata {
-        Some(path) => Some(fs::read(path)?),
+    let global_metadata_data = args
+        .il2cpp_metadata
+        .map(|path| fs::read(path))
+        .transpose()?;
+    let il2cpp_metadata = match &global_metadata_data {
+        Some(data) => Some({
+            let global_metadata = brocolib::global_metadata::deserialize(&data)?;
+            let runtime_metadata = RuntimeMetadata::read(&obj_file, &global_metadata)?;
+            Metadata {
+                global_metadata,
+                runtime_metadata,
+            }
+        }),
         None => None,
     };
     let il2cpp_data = match &il2cpp_metadata {
-        Some(metadata) => Some(il2cpp::process(metadata, &obj_file)?),
+        Some(metadata) => Some(il2cpp::process(&metadata)?),
         None => None,
     };
 

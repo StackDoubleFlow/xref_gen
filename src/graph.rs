@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use bad64::{disasm, Imm, Op, Operand, Reg};
-use il2cpp_binary::Elf;
+use brocolib::runtime_metadata::elf::{vaddr_conv, Elf};
 use object::elf::{STT_FUNC, STT_OBJECT};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -210,7 +210,8 @@ pub fn gen_graph<'obj>(
         }
 
         let addr = n.addr();
-        let code = &bin_data[addr as usize..(addr + n.size()) as usize];
+        let offset = vaddr_conv(&obj_file, addr)?;
+        let code = &bin_data[offset as usize..(offset + n.size()) as usize];
         let decoded = disasm(code, addr);
         let mut num_b = 0;
         let mut num_bl = 0;

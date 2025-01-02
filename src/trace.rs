@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use crate::graph::{GraphInfo, Node, Ref, RefType};
 use crate::il2cpp::Il2CppData;
 use anyhow::{bail, Result};
-use il2cpp_binary::Elf;
+use brocolib::runtime_metadata::elf::Elf;
 use indicatif::ProgressIterator;
 use object::{Object, ObjectSymbol};
 use petgraph::graph::{EdgeReference, NodeIndex};
@@ -45,7 +45,8 @@ pub fn trace<'obj>(
         }
     }
     // let mut roots = HashSet::new();
-    // roots.insert(obj_file.symbols().find(|s| s.name().unwrap() == "_ZN6il2cpp2vm7Runtime4InitEPKc").unwrap().address());
+    // roots.insert(obj_file.symbols().find(|s| s.name().unwrap() ==
+    // "_ZN6il2cpp2vm7Runtime4InitEPKc").unwrap().address());
 
     // Instead of keeping track of the paths like this, I should be keeping track of node parents,
     // but whatever
