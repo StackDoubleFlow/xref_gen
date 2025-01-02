@@ -1,10 +1,6 @@
-use std::collections::HashMap;
-use std::io::Cursor;
-
 use anyhow::{Context, Result};
-use byteorder::{LittleEndian, ReadBytesExt};
-use il2cpp_binary::{find_registration, get_str, CodeRegistration, Elf};
-use object::{Object, ObjectSection};
+use il2cpp_binary::{get_str, registrations, Elf};
+use std::collections::HashMap;
 
 pub struct Il2CppMethod<'a> {
     pub name: &'a str,
@@ -27,14 +23,16 @@ pub struct Il2CppData<'a> {
 pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>> {
     let mut methods = Vec::new();
     let metadata = il2cpp_metadata_raw::deserialize(metadata_data)?;
-    let (code_registration, _) = find_registration(elf)?;
-    let code_registration = CodeRegistration::read(elf, code_registration)?;
+    let (code_registration, _) = registrations(elf, &metadata)?;
 
     let mut invoker_uses = HashMap::new();
 
     for image in &metadata.images {
         let name = get_str(metadata.string, image.name_index as usize)?;
-        let module = code_registration.modules.iter().find(|m| m.name == name);
+        let module = code_registration
+            .code_gen_modules
+            .iter()
+            .find(|m| m.name == name);
         let module = module
             .with_context(|| format!("count not find code registration module '{}'", name))?;
         for type_def in &metadata.type_definitions
@@ -47,10 +45,8 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
             } else {
                 0
             };
-            for (idx, method) in metadata.methods
+            for method in &metadata.methods
                 [method_start as usize..method_start as usize + type_def.method_count as usize]
-                .iter()
-                .enumerate()
             {
                 let rid = method.token & 0x00FFFFFF;
                 let offset = module.method_pointers[rid as usize - 1];
@@ -58,10 +54,8 @@ pub fn process<'a>(metadata_data: &'a [u8], elf: &Elf) -> Result<Il2CppData<'a>>
                     continue;
                 }
 
-                let mut cur = Cursor::new(elf.data());
-                cur.set_position(module.invoker_indices_ptr + (rid as u64 - 1) * 4);
-                let invoker_idx = cur.read_i32::<LittleEndian>()?;
-                if invoker_idx != -1 {
+                let invoker_idx = module.invoker_indices[rid as usize - 1];
+                if invoker_idx != u32::MAX {
                     invoker_uses.entry(invoker_idx).or_insert(methods.len());
                 }
 

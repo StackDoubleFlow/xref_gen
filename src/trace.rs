@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::graph::{GraphInfo, Ref, RefType, Node};
+use crate::graph::{GraphInfo, Node, Ref, RefType};
 use crate::il2cpp::Il2CppData;
 use anyhow::{bail, Result};
 use il2cpp_binary::Elf;

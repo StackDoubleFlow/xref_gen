@@ -77,10 +77,9 @@ impl<'obj> Node<'obj> {
     pub fn demangled(&self) -> String {
         match self {
             Node::Symbol(symbol) => symbol.demangled.to_string(),
-            Node::Il2CppMethod(method) => format!(
-                "{}.{}::{}",
-                method.namespace, method.class, method.name
-            ),
+            Node::Il2CppMethod(method) => {
+                format!("{}.{}::{}", method.namespace, method.class, method.name)
+            }
             Node::Invoker(method, _, _) => format!(
                 "Invoker for {}.{}::{}",
                 method.namespace, method.class, method.name
