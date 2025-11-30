@@ -4,11 +4,12 @@ use crate::graph::{GraphInfo, Node, Ref, RefType};
 use crate::il2cpp::Il2CppData;
 use anyhow::{bail, Result};
 use brocolib::runtime_metadata::elf::Elf;
-use indicatif::ProgressIterator;
+use indicatif::ParallelProgressIterator;
 use object::{Object, ObjectSymbol};
 use petgraph::graph::{EdgeReference, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::EdgeDirection;
+use rayon::prelude::*;
 use serde::Serialize;
 
 pub const SCRIPT_SOURCE: &str = include_str!("../resources/xrefgen.py");
@@ -79,36 +80,41 @@ pub fn gen_trace_data<'a>(
     graph_info: &'a GraphInfo,
     il2cpp_data: &'a Option<Il2CppData>,
 ) -> Output {
-    let mut traces = Vec::new();
-
     let graph = &graph_info.graph;
-    for node in graph_info.graph.node_indices().progress() {
-        if let Ok(path) = trace(obj_file, graph_info, node, il2cpp_data) {
-            if !matches!(&graph[node], Node::Symbol(_)) {
-                continue;
-            }
-            let symbol = graph[node].name();
-            let start = graph[path.last().unwrap().source()].name();
+    let traces = (0..graph_info.graph.node_count())
+        .into_par_iter()
+        .progress()
+        .flat_map(|idx| {
+            let node = NodeIndex::new(idx);
+            if let Ok(path) = trace(obj_file, graph_info, node, il2cpp_data) {
+                if !matches!(&graph[node], Node::Symbol(_)) {
+                    return None;
+                }
+                let symbol = graph[node].name();
+                let start = graph[path.last().unwrap().source()].name();
 
-            let mut s = String::new();
-            for e in path.iter().rev() {
-                let r = &graph[e.id()];
-                let (c, num) = match r.ty {
-                    RefType::B => ('B', r.num),
-                    RefType::Bl => ('L', r.num),
-                    RefType::PcRel { adrp_num } => ('P', adrp_num),
-                };
-                s.push(c);
-                s.push_str(&num.to_string());
-            }
+                let mut s = String::new();
+                for e in path.iter().rev() {
+                    let r = &graph[e.id()];
+                    let (c, num) = match r.ty {
+                        RefType::B => ('B', r.num),
+                        RefType::Bl => ('L', r.num),
+                        RefType::PcRel { adrp_num } => ('P', adrp_num),
+                    };
+                    s.push(c);
+                    s.push_str(&num.to_string());
+                }
 
-            traces.push(SymbolTrace {
-                symbol,
-                start,
-                trace: s,
-            });
-        }
-    }
+                Some(SymbolTrace {
+                    symbol,
+                    start,
+                    trace: s,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Output { traces }
 }
