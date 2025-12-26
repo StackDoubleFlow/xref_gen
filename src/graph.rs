@@ -187,8 +187,8 @@ pub fn gen_graph<'obj>(
             }
             continue;
         }
-        let demangled = if let Ok(demangle) = cpp_demangle::Symbol::new(symbol.name_bytes()?) {
-            demangle.to_string()
+        let demangled = if let Ok(symbol) = cpp_demangle::Symbol::new(symbol.name_bytes()?) {
+            symbol.demangle()?
         } else {
             symbol.name()?.to_string()
         };
