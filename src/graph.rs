@@ -192,6 +192,14 @@ pub fn gen_graph<'obj>(
         } else {
             symbol.name()?.to_string()
         };
+        if il2cpp_data.is_some() {
+            // Skip application-specific symbols
+            if demangled.starts_with("_stringLiteral")
+                && demangled.len() == "_stringLiteral".len() + 40
+            {
+                continue;
+            }
+        }
         let n = graph.add_node(Node::Symbol(Symbol {
             addr: symbol.address(),
             size: symbol.size(),
